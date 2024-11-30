@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"  # AMQP port
+      - "15672:15672"  # Management interface
+    volumes:
+       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf  # Mount the custom config file
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmqctl status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user_microservice_v1:
+    build: ./user_microservice_v1
+    container_name: user_service_v1
+    ports:
+      - "5001:5001"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  user_microservice_v2:
+    build: ./user_microservice_v2
+    container_name: user_service_v2
+    ports:
+      - "5002:5002"
+    depends_on:
+      rabbitmq:
+       condition: service_healthy
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  api_gateway:
+    build: ./api_gateway
+    container_name: api_gateway
+    ports:
+      - "5000:5000"
+    depends_on:
+      user_microservice_v1:
+        condition: service_healthy
+      user_microservice_v2:
+        condition: service_healthy
+      order_service:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  order_service:
+    build: ./order_microservice
+    container_name: order_service
+    ports:
+      - "5003:5003"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5003/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+  event_consumer:
+    build: ./event_consumer
+    container_name: event_consumer
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    networks:
+      - app_network
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongo --eval 'db.adminCommand({ping: 1})'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  mongo_data:
+
